@@ -1,8 +1,10 @@
 package com.tsimafei.nexus_core.finance.service;
 
 import com.tsimafei.nexus_core.finance.domain.Account;
+import com.tsimafei.nexus_core.finance.domain.Category;
 import com.tsimafei.nexus_core.finance.domain.Transaction;
 import com.tsimafei.nexus_core.finance.repository.AccountRepository;
+import com.tsimafei.nexus_core.finance.repository.CategoryRepository;
 import com.tsimafei.nexus_core.finance.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,13 +18,16 @@ public class FinanceService {
 
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
+    private final CategoryRepository categoryRepository;
     private final NbpExchangeRateService exchangeRateService;
 
     public FinanceService(AccountRepository accountRepository,
                           TransactionRepository transactionRepository,
+                          CategoryRepository categoryRepository,
                           NbpExchangeRateService exchangeRateService) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
+        this.categoryRepository = categoryRepository;
         this.exchangeRateService = exchangeRateService;
     }
 
@@ -34,6 +39,10 @@ public class FinanceService {
     public Transaction addTransaction(String accountName, BigDecimal amount, String type, String comment) {
         Account account = accountRepository.findByName(accountName)
                 .orElseThrow(() -> new IllegalArgumentException("Account not found: " + accountName));
+
+        // Автоматически привязываем дефолтную категорию "Other"
+        Category category = categoryRepository.findByNameIgnoreCase("Other")
+                .orElseGet(() -> categoryRepository.save(new Category("Other", type.toUpperCase())));
 
         BigDecimal currentBalance = account.getBalance();
         BigDecimal newBalance = "INCOME".equalsIgnoreCase(type)
@@ -47,6 +56,7 @@ public class FinanceService {
         transaction.setAccount(account);
         transaction.setAmount(amount);
         transaction.setType(type.toUpperCase());
+        transaction.setCategory(category);
         transaction.setComment(comment);
 
         return transactionRepository.save(transaction);

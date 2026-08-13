@@ -83,10 +83,11 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 
                 Available commands:
                 `/balance` - View total balance and all accounts
-                `/add [Account] [Amount] [INCOME/EXPENSE] [Comment]` - Add transaction
+                `/add [Account] [Amount] [TYPE] [Comment]` - Add transaction
                 
-                Example:
+                Examples:
                 `/add USD Cash 100 INCOME Salary`
+                `/add EUR Card 15 EXPENSE Bus ticket`
                 """;
         sendMessage(chatId, helpText);
     }
@@ -107,6 +108,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
 
     private void handleAddTransaction(String chatId, String text) {
         try {
+            // Формат: /add USD Cash 100 INCOME Salary
             String[] parts = text.split(" ", 5);
             if (parts.length < 5) {
                 sendMessage(chatId, "Usage: `/add [Account Name] [Amount] [INCOME/EXPENSE] [Comment]`");
@@ -121,7 +123,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             financeService.addTransaction(accountName, amount, type, comment);
             sendMessage(chatId, String.format("Transaction added successfully to *%s*!", accountName));
         } catch (Exception e) {
-            sendMessage(chatId, "Error adding transaction. Check format: `/add USD Cash 100 INCOME Salary`");
+            sendMessage(chatId, "Error adding transaction. Check format:\n`/add USD Cash 100 INCOME Salary`");
         }
     }
 
