@@ -18,6 +18,7 @@ import org.telegram.telegrambots.meta.generics.TelegramClient;
 import java.math.BigDecimal;
 import java.util.List;
 
+
 @Component
 public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingleThreadUpdateConsumer {
 
