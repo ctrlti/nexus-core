@@ -62,6 +62,14 @@ public class FinanceService {
         return transactionRepository.save(transaction);
     }
 
+    public List<Transaction> getRecentTransactions() {
+        return transactionRepository.findAll()
+                .stream()
+                .sorted((t1, t2) -> t2.getCreatedAt().compareTo(t1.getCreatedAt()))
+                .limit(10)
+                .toList();
+    }
+
     public BigDecimal getTotalInPln() {
         List<Account> accounts = accountRepository.findAll();
         BigDecimal totalPln = BigDecimal.ZERO;
