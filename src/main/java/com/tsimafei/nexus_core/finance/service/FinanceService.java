@@ -63,11 +63,7 @@ public class FinanceService {
     }
 
     public List<Transaction> getRecentTransactions() {
-        return transactionRepository.findAll()
-                .stream()
-                .sorted((t1, t2) -> t2.getCreatedAt().compareTo(t1.getCreatedAt()))
-                .limit(10)
-                .toList();
+        return transactionRepository.findTop10WithAccount();
     }
 
     public BigDecimal getTotalInPln() {
