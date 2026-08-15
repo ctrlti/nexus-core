@@ -84,4 +84,42 @@ public class FinanceService {
 
         return totalPln.setScale(2, RoundingMode.HALF_UP);
     }
+
+    @Transactional
+    public void transfer(String fromAccountName, String toAccountName, BigDecimal amount, String comment) {
+        Account fromAccount = accountRepository.findByName(fromAccountName)
+                .orElseThrow(() -> new IllegalArgumentException("Source account not found: " + fromAccountName));
+
+        Account toAccount = accountRepository.findByName(toAccountName)
+                .orElseThrow(() -> new IllegalArgumentException("Target account not found: " + toAccountName));
+
+        if (fromAccount.getBalance().compareTo(amount) < 0) {
+            throw new IllegalStateException("Insufficient funds in account: " + fromAccountName);
+        }
+
+        // Списываем со счета-источника
+        fromAccount.setBalance(fromAccount.getBalance().subtract(amount));
+        accountRepository.save(fromAccount);
+
+        // Пополняем счет-получатель
+        toAccount.setBalance(toAccount.getBalance().add(amount));
+        accountRepository.save(toAccount);
+
+        String txComment = (comment != null && !comment.isBlank()) ? comment : "Transfer";
+
+        // Записываем две связанные транзакции
+        Transaction expenseTx = new Transaction();
+        expenseTx.setAccount(fromAccount);
+        expenseTx.setAmount(amount);
+        expenseTx.setType("EXPENSE");
+        expenseTx.setComment("[Transfer -> " + toAccountName + "] " + txComment);
+        transactionRepository.save(expenseTx);
+
+        Transaction incomeTx = new Transaction();
+        incomeTx.setAccount(toAccount);
+        incomeTx.setAmount(amount);
+        incomeTx.setType("INCOME");
+        incomeTx.setComment("[Transfer <- " + fromAccountName + "] " + txComment);
+        transactionRepository.save(incomeTx);
+    }
 }

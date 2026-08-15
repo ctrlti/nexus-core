@@ -71,6 +71,33 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         handleCommand(chatId, messageText);
     }
 
+    private void handleTransfer(String chatId, String text) {
+        try {
+            // Формат: /transfer USD Card -> USD Cash 50 ATM withdrawal
+            String payload = text.substring(10).trim();
+            String[] parts = payload.split("->");
+            if (parts.length < 2) {
+                sendMessage(chatId, "Usage: `/transfer [From Account] -> [To Account] [Amount] [Comment]`", buildMainMenuKeyboard());
+                return;
+            }
+
+            String fromAccount = parts[0].trim();
+            String[] restParts = parts[1].trim().split(" ", 3);
+
+            String toAccount = restParts[0] + " " + restParts[1];
+            String[] amountAndComment = restParts[2].split(" ", 2);
+            BigDecimal amount = new BigDecimal(amountAndComment[0]);
+            String comment = amountAndComment.length > 1 ? amountAndComment[1] : "Transfer";
+
+            financeService.transfer(fromAccount, toAccount, amount, comment);
+            sendMessage(chatId, String.format("Transferred *%.2f* from *%s* to *%s* successfully!", amount, fromAccount, toAccount), buildMainMenuKeyboard());
+        } catch (IllegalStateException e) {
+            sendMessage(chatId, "Transfer error: " + e.getMessage(), buildMainMenuKeyboard());
+        } catch (Exception e) {
+            sendMessage(chatId, "Error processing transfer. Check format:\n`/transfer USD Card -> USD Cash 50 ATM withdrawal`", buildMainMenuKeyboard());
+        }
+    }
+
     private void handleCommand(String chatId, String text) {
         if (text.startsWith("/start") || text.startsWith("/help") || text.equals("ℹ️ Help")) {
             sendHelp(chatId);
@@ -80,6 +107,8 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             sendHistory(chatId);
         } else if (text.startsWith("/add ")) {
             handleAddTransaction(chatId, text);
+        } else if (text.startsWith("/transfer ")) {
+            handleTransfer(chatId, text);
         } else {
             sendMessage(chatId, "Unknown command. Use buttons below or /help.", buildMainMenuKeyboard());
         }
@@ -93,10 +122,12 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 • Click *📊 Balance* or send `/balance`
                 • Click *📜 History* or send `/history`
                 • `/add [Account] [Amount] [TYPE] [Comment]` - Add transaction
+                • `/transfer [From Account] -> [To Account] [Amount] [Comment]` - Transfer funds
                 
                 Examples:
                 `/add USD Cash 100 INCOME Salary`
                 `/add EUR Card 15 EXPENSE Bus ticket`
+                `/transfer USD Card -> USD Cash 50 ATM withdrawal`
                 """;
         sendMessage(chatId, helpText, buildMainMenuKeyboard());
     }
