@@ -233,7 +233,6 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
 
     private void handleCreateAccount(String chatId, String text) {
         try {
-            // Формат: /newaccount Revolut EUR
             String[] parts = text.split(" ");
             if (parts.length < 3) {
                 sendMessage(chatId, "Usage: `/newaccount [Account Name] [Currency]`\nExample: `/newaccount Revolut EUR`", buildMainMenuKeyboard());
