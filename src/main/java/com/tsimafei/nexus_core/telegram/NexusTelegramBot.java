@@ -109,6 +109,8 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             handleAddTransaction(chatId, text);
         } else if (text.startsWith("/transfer ")) {
             handleTransfer(chatId, text);
+        } else if (text.startsWith("/newaccount ")) {
+            handleCreateAccount(chatId, text);
         } else {
             sendMessage(chatId, "Unknown command. Use buttons below or /help.", buildMainMenuKeyboard());
         }
@@ -123,6 +125,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 • Click *📜 History* or send `/history`
                 • `/add [Account] [Amount] [TYPE] [Comment]` - Add transaction
                 • `/transfer [From Account] -> [To Account] [Amount] [Comment]` - Transfer funds
+                • `/newaccount [Name] [Currency]` - Create a new account
                 
                 Examples:
                 `/add USD Cash 100 INCOME Salary`
@@ -225,6 +228,27 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             telegramClient.execute(builder.build());
         } catch (TelegramApiException e) {
             log.error("Failed to send telegram message", e);
+        }
+    }
+
+    private void handleCreateAccount(String chatId, String text) {
+        try {
+            // Формат: /newaccount Revolut EUR
+            String[] parts = text.split(" ");
+            if (parts.length < 3) {
+                sendMessage(chatId, "Usage: `/newaccount [Account Name] [Currency]`\nExample: `/newaccount Revolut EUR`", buildMainMenuKeyboard());
+                return;
+            }
+
+            String currency = parts[parts.length - 1].trim().toUpperCase();
+            String name = text.substring(12, text.lastIndexOf(parts[parts.length - 1])).trim();
+
+            financeService.createAccount(name, currency);
+            sendMessage(chatId, String.format("Account *%s* (%s) created successfully with balance *0.00*!", name, currency), buildMainMenuKeyboard());
+        } catch (IllegalArgumentException e) {
+            sendMessage(chatId, "Error: " + e.getMessage(), buildMainMenuKeyboard());
+        } catch (Exception e) {
+            sendMessage(chatId, "Error creating account. Check format:\n`/newaccount Revolut EUR`", buildMainMenuKeyboard());
         }
     }
 }

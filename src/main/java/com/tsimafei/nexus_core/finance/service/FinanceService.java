@@ -122,4 +122,18 @@ public class FinanceService {
         incomeTx.setComment("[Transfer <- " + fromAccountName + "] " + txComment);
         transactionRepository.save(incomeTx);
     }
+
+    @Transactional
+    public Account createAccount(String name, String currency) {
+        if (accountRepository.findByName(name).isPresent()) {
+            throw new IllegalArgumentException("Account with name '" + name + "' already exists.");
+        }
+
+        Account account = new Account();
+        account.setName(name);
+        account.setCurrency(currency.toUpperCase());
+        account.setBalance(BigDecimal.ZERO);
+
+        return accountRepository.save(account);
+    }
 }
