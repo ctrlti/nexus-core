@@ -1,7 +1,10 @@
+version: '3.8'
+
 services:
-  postgres:
+  nexus-db:
     image: postgres:16-alpine
     container_name: nexus-postgres
+    restart: always
     environment:
       POSTGRES_DB: nexus_db
       POSTGRES_USER: postgres
@@ -9,7 +12,29 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - nexus_pgdata:/var/lib/postgresql/data
+    networks:
+      - nexus-network
+
+  nexus-core:
+    build: .
+    container_name: nexus-core-app
+    restart: always
+    depends_on:
+      - nexus-db
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://nexus-db:5432/nexus_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres_password
+      BOT_USERNAME: ${BOT_USERNAME}
+      BOT_TOKEN: ${BOT_TOKEN}
+      AUTHORIZED_CHAT_ID: ${AUTHORIZED_CHAT_ID}
+    networks:
+      - nexus-network
 
 volumes:
-  postgres_data:
+  nexus_pgdata:
+
+networks:
+  nexus-network:
+    driver: bridge
