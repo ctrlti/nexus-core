@@ -32,6 +32,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 
 @Component
 public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingleThreadUpdateConsumer {
@@ -184,7 +188,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             }
             case "⏰ One-time Reminder" -> {
                 userStates.put(chatId, "REMINDER");
-                sendMessage(chatId, "Format: `[HH:mm] [Text]`\nExample: `19:30 Call doctor`", null, null);
+                sendMessage(chatId, "Format:\n`[HH:mm] [Text]` (today/tomorrow)\n`[dd.MM] [HH:mm] [Text]` (specific date)\n\nExamples:\n`19:30 Call doctor`\n`25.08 14:00 Visit dentist`", null, null);
             }
             case "🔄 Weekly Reminder" -> {
                 userStates.put(chatId, "WEEKLY_REMINDER");
@@ -231,6 +235,38 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         }
     }
 
+    private LocalDateTime parseDateTime(String input) {
+        // format: 25.08 14:00 OR 25.08.2026 14:00 OR 14:00
+        String[] parts = input.trim().split(" ");
+
+        if (parts.length == 1) {
+            // only time provided -> schedule for today or tomorrow
+            LocalTime time = LocalTime.parse(parts[0], TIME_FORMATTER);
+            LocalDateTime target = LocalDateTime.of(LocalDate.now(), time);
+            return target.isBefore(LocalDateTime.now()) ? target.plusDays(1) : target;
+        }
+
+        // date + time provided (e.g. "25.08 14:00")
+        String datePart = parts[0];
+        String timePart = parts[1];
+        LocalTime time = LocalTime.parse(timePart, TIME_FORMATTER);
+
+        LocalDate date;
+        if (datePart.length() == 5) { // dd.MM
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM");
+            java.time.MonthDay monthDay = java.time.MonthDay.parse(datePart, formatter);
+            date = monthDay.atYear(LocalDate.now().getYear());
+            if (date.isBefore(LocalDate.now())) {
+                date = date.plusYears(1);
+            }
+        } else { // dd.MM.yyyy
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+            date = LocalDate.parse(datePart, formatter);
+        }
+
+        return LocalDateTime.of(date, time);
+    }
+
     private void handleAwaitingInput(String chatId, String text) {
         String state = userStates.remove(chatId);
 
@@ -251,6 +287,25 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 String task = parts[2];
                 Reminder reminder = reminderService.createMonthlyReminder(task, day, time);
                 sendMessage(chatId, String.format("🔄 Monthly task set for day *%d* at *%s*! `[%d]`", day, reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
+            } else if ("REMINDER".equals(state)) {
+                // handle either "19:30 Task" or "25.08 19:30 Task"
+                String[] parts = text.split(" ", 3);
+                LocalDateTime remindAt;
+                String task;
+
+                if (parts[0].contains(".")) {
+                    // format: 25.08 14:00 Visit doctor
+                    remindAt = parseDateTime(parts[0] + " " + parts[1]);
+                    task = parts[2];
+                } else {
+                    // format: 14:00 Call doctor
+                    remindAt = parseDateTime(parts[0]);
+                    task = text.substring(parts[0].length()).trim();
+                }
+
+                Reminder reminder = reminderService.createOneTimeReminder(task, remindAt);
+                sendMessage(chatId, String.format("⏰ Reminder set for *%s*! `[%d]`",
+                        reminder.getRemindAt().format(DATE_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
             } else if ("WEEKLY_REMINDER".equals(state)) {
                 String[] parts = text.split(" ", 3);
                 java.time.DayOfWeek day = java.time.DayOfWeek.valueOf(parts[0].toUpperCase());
