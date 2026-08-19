@@ -9,6 +9,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
+import java.time.DayOfWeek;
+import java.time.temporal.TemporalAdjusters;
 
 @Service
 public class ReminderService {
@@ -73,10 +75,11 @@ public class ReminderService {
 
         if ("DAILY".equalsIgnoreCase(interval)) {
             reminder.setRemindAt(reminder.getRemindAt().plusDays(1));
+        } else if ("WEEKLY".equalsIgnoreCase(interval)) {
+            reminder.setRemindAt(reminder.getRemindAt().plusWeeks(1));
         } else if ("MONTHLY".equalsIgnoreCase(interval)) {
             reminder.setRemindAt(reminder.getRemindAt().plusMonths(1));
         } else {
-            // one-time task
             reminder.setActive(false);
         }
 
@@ -90,5 +93,20 @@ public class ReminderService {
             reminderRepository.save(r);
             return true;
         }).orElse(false);
+    }
+
+    @Transactional
+    public Reminder createWeeklyReminder(String text, DayOfWeek dayOfWeek, LocalTime time) {
+        LocalDate today = LocalDate.now();
+        // find next occurrence of the day of week
+        LocalDate targetDate = today.with(TemporalAdjusters.nextOrSame(dayOfWeek));
+        LocalDateTime remindAt = LocalDateTime.of(targetDate, time);
+
+        // if the target time today has already passed, schedule for next week
+        if (remindAt.isBefore(LocalDateTime.now())) {
+            remindAt = remindAt.plusWeeks(1);
+        }
+
+        return reminderRepository.save(new Reminder(text, remindAt, "WEEKLY"));
     }
 }

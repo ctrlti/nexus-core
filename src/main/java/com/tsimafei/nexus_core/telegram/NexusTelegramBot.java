@@ -123,6 +123,39 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         }
     }
 
+    private void handleRepeatCommand(String chatId, String text) {
+        try {
+            String[] parts = text.split(" ");
+            String frequency = parts[1].toLowerCase();
+
+            if ("weekly".equals(frequency)) {
+                // /repeat weekly monday 10:00 Team sync
+                java.time.DayOfWeek day = java.time.DayOfWeek.valueOf(parts[2].toUpperCase());
+                LocalTime time = LocalTime.parse(parts[3], TIME_FORMATTER);
+                String taskText = text.substring(text.indexOf(parts[3]) + parts[3].length()).trim();
+
+                Reminder reminder = reminderService.createWeeklyReminder(taskText, day, time);
+                sendMessage(chatId, String.format("🔄 Weekly reminder set for *%s* at *%s*! `[%d]`",
+                        day, reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
+            } else if ("daily".equals(frequency)) {
+                LocalTime time = LocalTime.parse(parts[2], TIME_FORMATTER);
+                String taskText = text.substring(text.indexOf(parts[2]) + parts[2].length()).trim();
+                Reminder reminder = reminderService.createDailyReminder(taskText, time);
+                sendMessage(chatId, String.format("🔄 Daily reminder set for *%s*! `[%d]`",
+                        reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
+            } else if ("monthly".equals(frequency)) {
+                int day = Integer.parseInt(parts[2]);
+                LocalTime time = LocalTime.parse(parts[3], TIME_FORMATTER);
+                String taskText = text.substring(text.indexOf(parts[3]) + parts[3].length()).trim();
+                Reminder reminder = reminderService.createMonthlyReminder(taskText, day, time);
+                sendMessage(chatId, String.format("🔄 Monthly reminder set for day *%d* at *%s*! `[%d]`",
+                        day, reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
+            }
+        } catch (Exception e) {
+            sendMessage(chatId, "Format error. Examples:\n`/repeat weekly monday 10:00 Team meeting`\n`/repeat daily 09:00 Workout`\n`/repeat monthly 15 12:00 Rent`", buildTasksKeyboard(), null);
+        }
+    }
+
     private void handleCommand(String chatId, String text) {
         switch (text) {
             case "/start", "/help", "⬅️ Main Menu" ->
@@ -153,10 +186,19 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 userStates.put(chatId, "REMINDER");
                 sendMessage(chatId, "Format: `[HH:mm] [Text]`\nExample: `19:30 Call doctor`", null, null);
             }
+            case "🔄 Weekly Reminder" -> {
+                userStates.put(chatId, "WEEKLY_REMINDER");
+                sendMessage(chatId, "Format: `[Day] [HH:mm] [Text]`\nExample: `monday 10:00 Team sync`", null, null);
+            }
             case "🔄 Monthly Reminder" -> {
                 userStates.put(chatId, "MONTHLY_REMINDER");
                 sendMessage(chatId, "Format: `[Day] [HH:mm] [Text]`\nExample: `15 12:00 Pay rent`", null, null);
             }
+
+            // --- COMMAND PREFIXES ---
+            case String s when s.startsWith("/repeat ") ->
+                    handleRepeatCommand(chatId, text);
+
             case String s when s.startsWith("/done ") || s.startsWith("/delete ") ->
                     handleDeleteReminder(chatId, text);
 
@@ -209,6 +251,14 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 String task = parts[2];
                 Reminder reminder = reminderService.createMonthlyReminder(task, day, time);
                 sendMessage(chatId, String.format("🔄 Monthly task set for day *%d* at *%s*! `[%d]`", day, reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
+            } else if ("WEEKLY_REMINDER".equals(state)) {
+                String[] parts = text.split(" ", 3);
+                java.time.DayOfWeek day = java.time.DayOfWeek.valueOf(parts[0].toUpperCase());
+                LocalTime time = LocalTime.parse(parts[1], TIME_FORMATTER);
+                String task = parts[2];
+                Reminder reminder = reminderService.createWeeklyReminder(task, day, time);
+                sendMessage(chatId, String.format("🔄 Weekly reminder set for *%s* at *%s*! `[%d]`",
+                        day, reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
             } else if ("AMOUNT_INCOME".equals(state) || "AMOUNT_EXPENSE".equals(state)) {
                 String accountName = selectedAccounts.remove(chatId);
                 String type = "AMOUNT_INCOME".equals(state) ? "INCOME" : "EXPENSE";
@@ -221,6 +271,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 String sign = "INCOME".equals(type) ? "➕" : "➖";
                 sendMessage(chatId, String.format("%s *%.2f* recorded on *%s*!", sign, amount, accountName), buildFinanceKeyboard(), null);
             }
+
         } catch (Exception e) {
             sendMessage(chatId, "⚠️ Invalid format. Operation canceled.", buildMainMenuKeyboard(), null);
         }
@@ -372,6 +423,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
 
         KeyboardRow row2 = new KeyboardRow();
         row2.add("⏰ One-time Reminder");
+        row2.add("🔄 Weekly Reminder");
         row2.add("🔄 Monthly Reminder");
 
         KeyboardRow row3 = new KeyboardRow();
