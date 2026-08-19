@@ -70,6 +70,11 @@ public class ReminderService {
     }
 
     @Transactional
+    public Reminder createOneTimeReminder(String text, LocalDateTime remindAt) {
+        return reminderRepository.save(new Reminder(text, remindAt, "NONE"));
+    }
+
+    @Transactional
     public void processTriggeredReminder(Reminder reminder) {
         String interval = reminder.getRepeatInterval();
 
