@@ -1,0 +1,26 @@
+name: Deploy Nexus Core
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://t.me/ass15tant_bot
+
+    steps:
+      - name: Deploy to Oracle Cloud via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/nexus-core
+            git pull origin main
+            ./mvnw clean package -DskipTests
+            sudo docker-compose up -d --build
