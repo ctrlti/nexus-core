@@ -26,4 +26,4 @@ jobs:
             git pull origin main
             export MAVEN_OPTS="-Xmx512m"
             ./mvnw clean package -DskipTests
-            sudo docker-compose up -d --build
+            sudo docker compose up -d --build
