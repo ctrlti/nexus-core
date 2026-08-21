@@ -3,7 +3,7 @@ name: Deploy Nexus Core
 on:
   push:
     branches:
-      - master
+      - main
 
 jobs:
   deploy:
