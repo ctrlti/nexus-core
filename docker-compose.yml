@@ -4,6 +4,7 @@ services:
     container_name: nexus-postgres
     restart: always
     environment:
+      TZ: Europe/Warsaw
       POSTGRES_DB: nexus_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres_password
@@ -21,6 +22,7 @@ services:
     depends_on:
       - nexus-db
     environment:
+      TZ: Europe/Warsaw
       SPRING_DATASOURCE_URL: jdbc:postgresql://nexus-db:5432/nexus_db
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: postgres_password
