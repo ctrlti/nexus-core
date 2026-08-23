@@ -409,7 +409,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
 
         for (int i = 0; i < tasks.size(); i++) {
             Reminder task = tasks.get(i);
-            int displayIndex = i + 1; // Всегда 1, 2, 3, ... без пропусков
+            int displayIndex = i + 1;
 
             if (task.getRemindAt() == null) {
                 sb.append(String.format("%d. 📌 %s\n", displayIndex, task.getText()));
@@ -422,10 +422,9 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                         repeat));
             }
 
-            // Кнопка для быстрого закрытия этой конкретной задачи
             InlineKeyboardButton doneBtn = InlineKeyboardButton.builder()
                     .text(String.format("✅ Done #%d", displayIndex))
-                    .callbackData("DONE_TASK_" + task.getId()) // Под капотом используем реальный ID
+                    .callbackData("DONE_TASK_" + task.getId())
                     .build();
             InlineKeyboardRow row = new InlineKeyboardRow();
             row.add(doneBtn);
