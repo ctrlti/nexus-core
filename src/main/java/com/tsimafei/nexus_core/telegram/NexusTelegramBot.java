@@ -272,48 +272,42 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
 
         try {
             if ("NOTE".equals(state)) {
-                Reminder note = reminderService.createNote(text);
-                sendMessage(chatId, String.format("📌 Note saved! `[%d]`", note.getId()), buildTasksKeyboard(), null);
+                reminderService.createNote(text);
+                sendMessage(chatId, "📌 Note saved!", buildTasksKeyboard(), null);
             } else if ("REMINDER".equals(state)) {
-                String[] parts = text.split(" ", 2);
-                LocalTime time = LocalTime.parse(parts[0], TIME_FORMATTER);
-                String task = parts[1];
-                Reminder reminder = reminderService.createOneTimeReminder(task, time);
-                sendMessage(chatId, String.format("⏰ Reminder set for *%s*! `[%d]`", reminder.getRemindAt().format(DATE_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
+                String[] parts = text.split(" ");
+                LocalDateTime remindAt;
+                String task;
+
+                if (parts[0].contains(".")) {
+                    // Date + time provided: "24.08 12:20 Task"
+                    remindAt = parseDateTime(parts[0] + " " + parts[1]);
+                    task = text.substring(parts[0].length() + parts[1].length() + 2).trim();
+                } else {
+                    // Time only provided: "19:30 Task"
+                    remindAt = parseDateTime(parts[0]);
+                    task = text.substring(parts[0].length()).trim();
+                }
+
+                Reminder reminder = reminderService.createOneTimeReminder(task, remindAt);
+                sendMessage(chatId, String.format("⏰ Reminder set for *%s*!",
+                        reminder.getRemindAt().format(DATE_FORMATTER)), buildTasksKeyboard(), null);
             } else if ("MONTHLY_REMINDER".equals(state)) {
                 String[] parts = text.split(" ", 3);
                 int day = Integer.parseInt(parts[0]);
                 LocalTime time = LocalTime.parse(parts[1], TIME_FORMATTER);
                 String task = parts[2];
                 Reminder reminder = reminderService.createMonthlyReminder(task, day, time);
-                sendMessage(chatId, String.format("🔄 Monthly task set for day *%d* at *%s*! `[%d]`", day, reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
-            } else if ("REMINDER".equals(state)) {
-                // handle either "19:30 Task" or "25.08 19:30 Task"
-                String[] parts = text.split(" ", 3);
-                LocalDateTime remindAt;
-                String task;
-
-                if (parts[0].contains(".")) {
-                    // format: 25.08 14:00 Visit doctor
-                    remindAt = parseDateTime(parts[0] + " " + parts[1]);
-                    task = parts[2];
-                } else {
-                    // format: 14:00 Call doctor
-                    remindAt = parseDateTime(parts[0]);
-                    task = text.substring(parts[0].length()).trim();
-                }
-
-                Reminder reminder = reminderService.createOneTimeReminder(task, remindAt);
-                sendMessage(chatId, String.format("⏰ Reminder set for *%s*! `[%d]`",
-                        reminder.getRemindAt().format(DATE_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
+                sendMessage(chatId, String.format("🔄 Monthly task set for day *%d* at *%s*!",
+                        day, reminder.getRemindAt().format(TIME_FORMATTER)), buildTasksKeyboard(), null);
             } else if ("WEEKLY_REMINDER".equals(state)) {
                 String[] parts = text.split(" ", 3);
                 java.time.DayOfWeek day = java.time.DayOfWeek.valueOf(parts[0].toUpperCase());
                 LocalTime time = LocalTime.parse(parts[1], TIME_FORMATTER);
                 String task = parts[2];
                 Reminder reminder = reminderService.createWeeklyReminder(task, day, time);
-                sendMessage(chatId, String.format("🔄 Weekly reminder set for *%s* at *%s*! `[%d]`",
-                        day, reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
+                sendMessage(chatId, String.format("🔄 Weekly reminder set for *%s* at *%s*!",
+                        day, reminder.getRemindAt().format(TIME_FORMATTER)), buildTasksKeyboard(), null);
             } else if ("AMOUNT_INCOME".equals(state) || "AMOUNT_EXPENSE".equals(state)) {
                 String accountName = selectedAccounts.remove(chatId);
                 String type = "AMOUNT_INCOME".equals(state) ? "INCOME" : "EXPENSE";
