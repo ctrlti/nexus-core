@@ -407,21 +407,25 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         StringBuilder sb = new StringBuilder("*Active Tasks & Reminders:*\n\n");
         List<InlineKeyboardRow> rows = new ArrayList<>();
 
-        for (Reminder task : tasks) {
+        for (int i = 0; i < tasks.size(); i++) {
+            Reminder task = tasks.get(i);
+            int displayIndex = i + 1; // Всегда 1, 2, 3, ... без пропусков
+
             if (task.getRemindAt() == null) {
-                sb.append(String.format("📌 `[%d]` %s\n", task.getId(), task.getText()));
+                sb.append(String.format("%d. 📌 %s\n", displayIndex, task.getText()));
             } else {
                 String repeat = "NONE".equalsIgnoreCase(task.getRepeatInterval()) ? "" : " [" + task.getRepeatInterval() + "]";
-                sb.append(String.format("⏰ `[%d]` %s — *%s*%s\n",
-                        task.getId(),
+                sb.append(String.format("%d. ⏰ %s — *%s*%s\n",
+                        displayIndex,
                         task.getText(),
                         task.getRemindAt().format(DATE_FORMATTER),
                         repeat));
             }
 
+            // Кнопка для быстрого закрытия этой конкретной задачи
             InlineKeyboardButton doneBtn = InlineKeyboardButton.builder()
-                    .text("✅ Done #" + task.getId())
-                    .callbackData("DONE_TASK_" + task.getId())
+                    .text(String.format("✅ Done #%d", displayIndex))
+                    .callbackData("DONE_TASK_" + task.getId()) // Под капотом используем реальный ID
                     .build();
             InlineKeyboardRow row = new InlineKeyboardRow();
             row.add(doneBtn);
