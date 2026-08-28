@@ -80,7 +80,8 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         List<Reminder> dueReminders = reminderService.getDueReminders();
         for (Reminder reminder : dueReminders) {
             String text = String.format("🔔 *Reminder:*\n\n%s", reminder.getText());
-            sendMessage(authorizedChatId, text, null, null);
+            InlineKeyboardMarkup snoozeMarkup = buildSnoozeKeyboard(reminder.getId());
+            sendMessage(authorizedChatId, text, null, snoozeMarkup);
             reminderService.processTriggeredReminder(reminder);
         }
     }
@@ -230,8 +231,10 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         } else if (data.startsWith("DONE_TASK_")) {
             Long taskId = Long.parseLong(data.replace("DONE_TASK_", ""));
             reminderService.deleteById(taskId);
-            sendMessage(chatId, String.format("✅ Task `[%d]` completed!", taskId), null, null);
+            sendMessage(chatId, "✅ Task completed!", null, null);
             sendActiveTasks(chatId);
+        } else if (data.startsWith("SNOOZE_")) {
+            handleSnoozeCallback(chatId, data);
         }
     }
 
@@ -509,5 +512,67 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         } catch (TelegramApiException e) {
             log.error("Failed to send telegram message", e);
         }
+    }
+
+    private void handleSnoozeCallback(String chatId, String data) {
+        // Format: SNOOZE_{MINUTES}_{TASK_ID} or SNOOZE_TOMORROW_{TASK_ID}
+        String[] parts = data.split("_");
+        Long taskId = Long.parseLong(parts[2]);
+        LocalDateTime newTime;
+        String readableTime;
+
+        if ("TOMORROW".equals(parts[1])) {
+            newTime = LocalDate.now().plusDays(1).atTime(9, 0);
+            readableTime = "tomorrow at 09:00";
+        } else {
+            int minutes = Integer.parseInt(parts[1]);
+            newTime = LocalDateTime.now().plusMinutes(minutes);
+            readableTime = String.format("+%dm (%s)", minutes, newTime.format(TIME_FORMATTER));
+        }
+
+        reminderService.snoozeReminder(taskId, newTime);
+        sendMessage(chatId, String.format("💤 Reminder snoozed until *%s*.", readableTime), null, null);
+    }
+
+    private InlineKeyboardMarkup buildSnoozeKeyboard(Long taskId) {
+        InlineKeyboardButton btn15m = InlineKeyboardButton.builder()
+                .text("⏰ +15m")
+                .callbackData(String.format("SNOOZE_15_%d", taskId))
+                .build();
+
+        InlineKeyboardButton btn1h = InlineKeyboardButton.builder()
+                .text("⏰ +1h")
+                .callbackData(String.format("SNOOZE_60_%d", taskId))
+                .build();
+
+        InlineKeyboardButton btn3h = InlineKeyboardButton.builder()
+                .text("⏰ +3h")
+                .callbackData(String.format("SNOOZE_180_%d", taskId))
+                .build();
+
+        InlineKeyboardButton btnTomorrow = InlineKeyboardButton.builder()
+                .text("📅 Tomorrow 09:00")
+                .callbackData(String.format("SNOOZE_TOMORROW_%d", taskId))
+                .build();
+
+        InlineKeyboardButton btnDone = InlineKeyboardButton.builder()
+                .text("✅ Done")
+                .callbackData("DONE_TASK_" + taskId)
+                .build();
+
+        InlineKeyboardRow row1 = new InlineKeyboardRow();
+        row1.add(btn15m);
+        row1.add(btn1h);
+        row1.add(btn3h);
+
+        InlineKeyboardRow row2 = new InlineKeyboardRow();
+        row2.add(btnTomorrow);
+        row2.add(btnDone);
+
+        List<InlineKeyboardRow> rows = new ArrayList<>();
+        rows.add(row1);
+        rows.add(row2);
+
+        return InlineKeyboardMarkup.builder().keyboard(rows).build();
     }
 }
