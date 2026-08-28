@@ -114,4 +114,13 @@ public class ReminderService {
 
         return reminderRepository.save(new Reminder(text, remindAt, "WEEKLY"));
     }
+
+    @Transactional
+    public void snoozeReminder(Long id, LocalDateTime newRemindAt) {
+        reminderRepository.findById(id).ifPresent(reminder -> {
+            reminder.setRemindAt(newRemindAt);
+            reminder.setActive(true);
+            reminderRepository.save(reminder);
+        });
+    }
 }
