@@ -35,11 +35,16 @@ jobs:
       - name: Deploy application via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_HOST }}
+          host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 15m
+          timeout: 60s
           script: |
             cd ~/nexus-core
             git pull origin main
+            chmod +x mvnw
+            export MAVEN_OPTS="-Xmx512m"
+            ./mvnw clean package -DskipTests
             docker compose down
-            docker compose up -d --build
+            docker compose up -d --build --remove-orphans
