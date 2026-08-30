@@ -8,6 +8,7 @@ import com.tsimafei.nexus_core.finance.repository.CategoryRepository;
 import com.tsimafei.nexus_core.finance.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.OffsetDateTime;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -86,41 +87,44 @@ public class FinanceService {
     }
 
     @Transactional
-    public void transfer(String fromAccountName, String toAccountName, BigDecimal amount, String comment) {
+    public void transfer(String fromAccountName, String toAccountName, BigDecimal amount, String note) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Transfer amount must be positive");
+        }
+
+        if (fromAccountName.equalsIgnoreCase(toAccountName)) {
+            throw new IllegalArgumentException("Cannot transfer to the same account");
+        }
+
         Account fromAccount = accountRepository.findByName(fromAccountName)
                 .orElseThrow(() -> new IllegalArgumentException("Source account not found: " + fromAccountName));
 
         Account toAccount = accountRepository.findByName(toAccountName)
                 .orElseThrow(() -> new IllegalArgumentException("Target account not found: " + toAccountName));
 
-        if (fromAccount.getBalance().compareTo(amount) < 0) {
-            throw new IllegalStateException("Insufficient funds in account: " + fromAccountName);
+        if (!fromAccount.getCurrency().equalsIgnoreCase(toAccount.getCurrency())) {
+            throw new IllegalArgumentException("Cross-currency transfer is not supported");
         }
 
-        // Списываем со счета-источника
         fromAccount.setBalance(fromAccount.getBalance().subtract(amount));
-        accountRepository.save(fromAccount);
-
-        // Пополняем счет-получатель
         toAccount.setBalance(toAccount.getBalance().add(amount));
+
+        accountRepository.save(fromAccount);
         accountRepository.save(toAccount);
 
-        String txComment = (comment != null && !comment.isBlank()) ? comment : "Transfer";
+        Transaction outTransaction = new Transaction();
+        outTransaction.setAccount(fromAccount);
+        outTransaction.setAmount(amount);
+        outTransaction.setType("EXPENSE");
+        outTransaction.setCreatedAt(OffsetDateTime.now());
+        transactionRepository.save(outTransaction);
 
-        // Записываем две связанные транзакции
-        Transaction expenseTx = new Transaction();
-        expenseTx.setAccount(fromAccount);
-        expenseTx.setAmount(amount);
-        expenseTx.setType("EXPENSE");
-        expenseTx.setComment("[Transfer -> " + toAccountName + "] " + txComment);
-        transactionRepository.save(expenseTx);
-
-        Transaction incomeTx = new Transaction();
-        incomeTx.setAccount(toAccount);
-        incomeTx.setAmount(amount);
-        incomeTx.setType("INCOME");
-        incomeTx.setComment("[Transfer <- " + fromAccountName + "] " + txComment);
-        transactionRepository.save(incomeTx);
+        Transaction inTransaction = new Transaction();
+        inTransaction.setAccount(toAccount);
+        inTransaction.setAmount(amount);
+        inTransaction.setType("INCOME");
+        inTransaction.setCreatedAt(OffsetDateTime.now());
+        transactionRepository.save(inTransaction);
     }
 
     @Transactional
