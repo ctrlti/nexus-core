@@ -579,30 +579,89 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
     }
 
     private void handleTransferCommand(String chatId, String text) {
-        // Expected format: /transfer <from> <to> <amount> [optional note]
-        String[] parts = text.trim().split("\\s+", 4);
-        if (parts.length < 4) {
-            sendMessage(chatId, "⚠️ Usage: `/transfer <from> <to> <amount> [note]`\nExample: `/transfer Card Cash 200 ATM withdrawal`", null, null);
+        // Remove command prefix
+        String raw = text.replaceFirst("/transfer", "").trim();
+
+        // 1. Arrow syntax support: /transfer USD Cash -> USD Card 10 ATM
+        if (raw.contains("->")) {
+            String[] splitArrow = raw.split("->", 2);
+            String fromAccount = splitArrow[0].trim();
+            String rightSide = splitArrow[1].trim();
+
+            String[] tokens = rightSide.split("\\s+");
+            int amountIdx = -1;
+
+            // Find the numeric amount index
+            for (int i = 0; i < tokens.length; i++) {
+                if (tokens[i].matches("^\\d+(\\.\\d+)?$")) {
+                    amountIdx = i;
+                    break;
+                }
+            }
+
+            if (amountIdx == -1) {
+                sendMessage(chatId, "⚠️ Invalid amount format. Example: `/transfer USD Cash -> USD Card 10`", buildFinanceKeyboard(), null);
+                return;
+            }
+
+            // Build target account name (all words before amount)
+            StringBuilder toAccBuilder = new StringBuilder();
+            for (int i = 0; i < amountIdx; i++) {
+                if (i > 0) toAccBuilder.append(" ");
+                toAccBuilder.append(tokens[i]);
+            }
+            String toAccount = toAccBuilder.toString().trim();
+
+            // Parse amount
+            BigDecimal amount = new BigDecimal(tokens[amountIdx]);
+
+            // Build optional note (all words after amount)
+            StringBuilder noteBuilder = new StringBuilder();
+            for (int i = amountIdx + 1; i < tokens.length; i++) {
+                if (!noteBuilder.isEmpty()) noteBuilder.append(" ");
+                noteBuilder.append(tokens[i]);
+            }
+            String note = noteBuilder.toString();
+
+            executeTransfer(chatId, fromAccount, toAccount, amount, note);
             return;
         }
 
-        String fromAccount = parts[1];
-        String toAccount = parts[2];
-        String[] amountAndNote = parts[3].split("\\s+", 2);
+        // 2. Direct match by existing account names: /transfer USD Cash USD Card 10
+        List<Account> allAccounts = financeService.getAllAccounts();
+        Account matchedFrom = allAccounts.stream()
+                .filter(a -> raw.toLowerCase().startsWith(a.getName().toLowerCase()))
+                .findFirst()
+                .orElse(null);
 
-        BigDecimal amount;
-        try {
-            amount = new BigDecimal(amountAndNote[0]);
-        } catch (Exception e) {
-            sendMessage(chatId, "⚠️ Invalid amount format. Example: `/transfer Card Cash 200`", null, null);
-            return;
+        if (matchedFrom != null) {
+            String rest = raw.substring(matchedFrom.getName().length()).trim();
+            Account matchedTo = allAccounts.stream()
+                    .filter(a -> rest.toLowerCase().startsWith(a.getName().toLowerCase()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (matchedTo != null) {
+                String afterAccounts = rest.substring(matchedTo.getName().length()).trim();
+                String[] amountAndNote = afterAccounts.split("\\s+", 2);
+                try {
+                    BigDecimal amount = new BigDecimal(amountAndNote[0]);
+                    String note = amountAndNote.length > 1 ? amountAndNote[1] : "";
+                    executeTransfer(chatId, matchedFrom.getName(), matchedTo.getName(), amount, note);
+                    return;
+                } catch (Exception ignored) {
+                    // Fall back to usage error message below
+                }
+            }
         }
 
-        String note = amountAndNote.length > 1 ? amountAndNote[1] : "";
+        sendMessage(chatId, "⚠️ Format error. Examples:\n`/transfer USD Cash -> USD Card 10`\n`/transfer USD Cash USD Card 10`", buildFinanceKeyboard(), null);
+    }
 
+    private void executeTransfer(String chatId, String from, String to, BigDecimal amount, String note) {
         try {
-            financeService.transfer(fromAccount, toAccount, amount, note);
-            sendMessage(chatId, String.format("🔄 Transferred *%s* from *%s* to *%s*.", amount, fromAccount, toAccount), buildFinanceKeyboard(), null);
+            financeService.transfer(from, to, amount, note);
+            sendMessage(chatId, String.format("🔄 Transferred *%.2f* from *%s* to *%s*.", amount, from, to), buildFinanceKeyboard(), null);
         } catch (IllegalArgumentException ex) {
             sendMessage(chatId, "⚠️ " + ex.getMessage(), buildFinanceKeyboard(), null);
         }
