@@ -89,4 +89,36 @@ class FinanceServiceTest {
 
         verify(transactionRepository, never()).save(any());
     }
+
+    @Test
+    void transfer_successful_shouldUpdateBothBalances() {
+        Account from = createAccount("Card", "PLN", BigDecimal.valueOf(500.00));
+        Account to = createAccount("Cash", "PLN", BigDecimal.valueOf(100.00));
+
+        when(accountRepository.findByName("Card")).thenReturn(Optional.of(from));
+        when(accountRepository.findByName("Cash")).thenReturn(Optional.of(to));
+
+        financeService.transfer("Card", "Cash", BigDecimal.valueOf(200.00), "ATM withdrawal");
+
+        assertEquals(BigDecimal.valueOf(300.00), from.getBalance());
+        assertEquals(BigDecimal.valueOf(300.00), to.getBalance());
+        verify(accountRepository).save(from);
+        verify(accountRepository).save(to);
+        verify(transactionRepository, times(2)).save(any(Transaction.class));
+    }
+
+    @Test
+    void transfer_differentCurrencies_shouldThrowException() {
+        Account from = createAccount("Card PLN", "PLN", BigDecimal.valueOf(500.00));
+        Account to = createAccount("Cash USD", "USD", BigDecimal.valueOf(100.00));
+
+        when(accountRepository.findByName("Card PLN")).thenReturn(Optional.of(from));
+        when(accountRepository.findByName("Cash USD")).thenReturn(Optional.of(to));
+
+        assertThrows(IllegalArgumentException.class, () ->
+                financeService.transfer("Card PLN", "Cash USD", BigDecimal.valueOf(50.00), "Exchange")
+        );
+
+        verify(transactionRepository, never()).save(any());
+    }
 }
