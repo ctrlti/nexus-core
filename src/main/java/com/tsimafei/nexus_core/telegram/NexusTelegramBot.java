@@ -201,6 +201,8 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             }
 
             // --- COMMAND PREFIXES ---
+            case String s when s.startsWith("/transfer") ->
+                    handleTransferCommand(chatId, text);
             case String s when s.startsWith("/repeat ") ->
                     handleRepeatCommand(chatId, text);
 
@@ -574,5 +576,35 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         rows.add(row2);
 
         return InlineKeyboardMarkup.builder().keyboard(rows).build();
+    }
+
+    private void handleTransferCommand(String chatId, String text) {
+        // Expected format: /transfer <from> <to> <amount> [optional note]
+        String[] parts = text.trim().split("\\s+", 4);
+        if (parts.length < 4) {
+            sendMessage(chatId, "⚠️ Usage: `/transfer <from> <to> <amount> [note]`\nExample: `/transfer Card Cash 200 ATM withdrawal`", null, null);
+            return;
+        }
+
+        String fromAccount = parts[1];
+        String toAccount = parts[2];
+        String[] amountAndNote = parts[3].split("\\s+", 2);
+
+        BigDecimal amount;
+        try {
+            amount = new BigDecimal(amountAndNote[0]);
+        } catch (Exception e) {
+            sendMessage(chatId, "⚠️ Invalid amount format. Example: `/transfer Card Cash 200`", null, null);
+            return;
+        }
+
+        String note = amountAndNote.length > 1 ? amountAndNote[1] : "";
+
+        try {
+            financeService.transfer(fromAccount, toAccount, amount, note);
+            sendMessage(chatId, String.format("🔄 Transferred *%s* from *%s* to *%s*.", amount, fromAccount, toAccount), buildFinanceKeyboard(), null);
+        } catch (IllegalArgumentException ex) {
+            sendMessage(chatId, "⚠️ " + ex.getMessage(), buildFinanceKeyboard(), null);
+        }
     }
 }
