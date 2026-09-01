@@ -396,7 +396,8 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         row.add(transferBtn);
         InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder().keyboard(List.of(row)).build();
 
-        sendMessage(chatId, sb.toString(), buildFinanceKeyboard(), markup);
+        // Pass null for ReplyKeyboard so InlineKeyboard is rendered attached to the message
+        sendMessage(chatId, sb.toString(), null, markup);
     }
 
     private void sendHistory(String chatId) {
