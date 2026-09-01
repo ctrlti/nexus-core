@@ -26,16 +26,14 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 
 @Component
 public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingleThreadUpdateConsumer {
@@ -52,6 +50,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
 
     private final Map<String, String> userStates = new ConcurrentHashMap<>();
     private final Map<String, String> selectedAccounts = new ConcurrentHashMap<>();
+    private final Map<String, String> targetTransferAccounts = new ConcurrentHashMap<>();
 
     public NexusTelegramBot(
             @Value("${nexus.telegram.bot-token}") String botToken,
@@ -113,53 +112,6 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
 
         handleCommand(chatId, messageText);
     }
-    private void handleDeleteReminder(String chatId, String text) {
-        try {
-            String[] parts = text.split(" ");
-            Long id = Long.parseLong(parts[1].trim());
-            boolean deleted = reminderService.deleteById(id);
-            if (deleted) {
-                sendMessage(chatId, String.format("Task `[%d]` removed / completed!", id), buildTasksKeyboard(), null);
-            } else {
-                sendMessage(chatId, "Task not found with ID: " + id, buildTasksKeyboard(), null);
-            }
-        } catch (Exception e) {
-            sendMessage(chatId, "Usage: `/done [ID]` or `/delete [ID]`", buildTasksKeyboard(), null);
-        }
-    }
-
-    private void handleRepeatCommand(String chatId, String text) {
-        try {
-            String[] parts = text.split(" ");
-            String frequency = parts[1].toLowerCase();
-
-            if ("weekly".equals(frequency)) {
-                // /repeat weekly monday 10:00 Team sync
-                java.time.DayOfWeek day = java.time.DayOfWeek.valueOf(parts[2].toUpperCase());
-                LocalTime time = LocalTime.parse(parts[3], TIME_FORMATTER);
-                String taskText = text.substring(text.indexOf(parts[3]) + parts[3].length()).trim();
-
-                Reminder reminder = reminderService.createWeeklyReminder(taskText, day, time);
-                sendMessage(chatId, String.format("🔄 Weekly reminder set for *%s* at *%s*! `[%d]`",
-                        day, reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
-            } else if ("daily".equals(frequency)) {
-                LocalTime time = LocalTime.parse(parts[2], TIME_FORMATTER);
-                String taskText = text.substring(text.indexOf(parts[2]) + parts[2].length()).trim();
-                Reminder reminder = reminderService.createDailyReminder(taskText, time);
-                sendMessage(chatId, String.format("🔄 Daily reminder set for *%s*! `[%d]`",
-                        reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
-            } else if ("monthly".equals(frequency)) {
-                int day = Integer.parseInt(parts[2]);
-                LocalTime time = LocalTime.parse(parts[3], TIME_FORMATTER);
-                String taskText = text.substring(text.indexOf(parts[3]) + parts[3].length()).trim();
-                Reminder reminder = reminderService.createMonthlyReminder(taskText, day, time);
-                sendMessage(chatId, String.format("🔄 Monthly reminder set for day *%d* at *%s*! `[%d]`",
-                        day, reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
-            }
-        } catch (Exception e) {
-            sendMessage(chatId, "Format error. Examples:\n`/repeat weekly monday 10:00 Team meeting`\n`/repeat daily 09:00 Workout`\n`/repeat monthly 15 12:00 Rent`", buildTasksKeyboard(), null);
-        }
-    }
 
     private void handleCommand(String chatId, String text) {
         switch (text) {
@@ -205,7 +157,6 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                     handleTransferCommand(chatId, text);
             case String s when s.startsWith("/repeat ") ->
                     handleRepeatCommand(chatId, text);
-
             case String s when s.startsWith("/done ") || s.startsWith("/delete ") ->
                     handleDeleteReminder(chatId, text);
 
@@ -230,6 +181,18 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             selectedAccounts.put(chatId, accountName);
             userStates.put(chatId, "AMOUNT_EXPENSE");
             sendMessage(chatId, String.format("Account: *%s*\nEnter amount and comment:\nExample: `25 Coffee and lunch`", accountName), null, null);
+        } else if ("START_TRANSFER".equals(data)) {
+            showTransferSourceSelection(chatId);
+        } else if (data.startsWith("TR_SRC_")) {
+            String sourceAccount = data.replace("TR_SRC_", "");
+            selectedAccounts.put(chatId, sourceAccount);
+            showTransferTargetSelection(chatId, sourceAccount);
+        } else if (data.startsWith("TR_TGT_")) {
+            String targetAccount = data.replace("TR_TGT_", "");
+            targetTransferAccounts.put(chatId, targetAccount);
+            userStates.put(chatId, "TRANSFER_AMOUNT");
+            sendMessage(chatId, String.format("Transfer from *%s* to *%s*.\nEnter amount and optional note:\nExample: `100` or `100 ATM withdrawal`",
+                    selectedAccounts.get(chatId), targetAccount), null, null);
         } else if (data.startsWith("DONE_TASK_")) {
             Long taskId = Long.parseLong(data.replace("DONE_TASK_", ""));
             reminderService.deleteById(taskId);
@@ -241,30 +204,27 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
     }
 
     private LocalDateTime parseDateTime(String input) {
-        // format: 25.08 14:00 OR 25.08.2026 14:00 OR 14:00
         String[] parts = input.trim().split(" ");
 
         if (parts.length == 1) {
-            // only time provided -> schedule for today or tomorrow
             LocalTime time = LocalTime.parse(parts[0], TIME_FORMATTER);
             LocalDateTime target = LocalDateTime.of(LocalDate.now(), time);
             return target.isBefore(LocalDateTime.now()) ? target.plusDays(1) : target;
         }
 
-        // date + time provided (e.g. "25.08 14:00")
         String datePart = parts[0];
         String timePart = parts[1];
         LocalTime time = LocalTime.parse(timePart, TIME_FORMATTER);
 
         LocalDate date;
-        if (datePart.length() == 5) { // dd.MM
+        if (datePart.length() == 5) {
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM");
             java.time.MonthDay monthDay = java.time.MonthDay.parse(datePart, formatter);
             date = monthDay.atYear(LocalDate.now().getYear());
             if (date.isBefore(LocalDate.now())) {
                 date = date.plusYears(1);
             }
-        } else { // dd.MM.yyyy
+        } else {
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
             date = LocalDate.parse(datePart, formatter);
         }
@@ -285,11 +245,9 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 String task;
 
                 if (parts[0].contains(".")) {
-                    // Date + time provided: "24.08 12:20 Task"
                     remindAt = parseDateTime(parts[0] + " " + parts[1]);
                     task = text.substring(parts[0].length() + parts[1].length() + 2).trim();
                 } else {
-                    // Time only provided: "19:30 Task"
                     remindAt = parseDateTime(parts[0]);
                     task = text.substring(parts[0].length()).trim();
                 }
@@ -324,6 +282,15 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 financeService.addTransaction(accountName, amount, type, comment);
                 String sign = "INCOME".equals(type) ? "➕" : "➖";
                 sendMessage(chatId, String.format("%s *%.2f* recorded on *%s*!", sign, amount, accountName), buildFinanceKeyboard(), null);
+            } else if ("TRANSFER_AMOUNT".equals(state)) {
+                String from = selectedAccounts.remove(chatId);
+                String to = targetTransferAccounts.remove(chatId);
+
+                String[] parts = text.split("\\s+", 2);
+                BigDecimal amount = new BigDecimal(parts[0]);
+                String note = parts.length > 1 ? parts[1] : "";
+
+                executeTransfer(chatId, from, to, amount, note);
             }
 
         } catch (Exception e) {
@@ -355,6 +322,60 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         sendMessage(chatId, "Select account for *" + operationType + "*:", null, markup);
     }
 
+    private void showTransferSourceSelection(String chatId) {
+        List<Account> accounts = financeService.getAllAccounts();
+        List<InlineKeyboardRow> rows = new ArrayList<>();
+
+        for (Account acc : accounts) {
+            InlineKeyboardButton btn = InlineKeyboardButton.builder()
+                    .text(String.format("%s (%s)", acc.getName(), acc.getCurrency()))
+                    .callbackData("TR_SRC_" + acc.getName())
+                    .build();
+            InlineKeyboardRow row = new InlineKeyboardRow();
+            row.add(btn);
+            rows.add(row);
+        }
+
+        InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder().keyboard(rows).build();
+        sendMessage(chatId, "Select source account *(FROM)*:", null, markup);
+    }
+
+    private void showTransferTargetSelection(String chatId, String sourceAccountName) {
+        Account source = financeService.getAllAccounts().stream()
+                .filter(a -> a.getName().equalsIgnoreCase(sourceAccountName))
+                .findFirst()
+                .orElse(null);
+
+        if (source == null) {
+            sendMessage(chatId, "⚠️ Source account not found.", buildFinanceKeyboard(), null);
+            return;
+        }
+
+        List<Account> targetAccounts = financeService.getAllAccounts().stream()
+                .filter(a -> a.getCurrency().equalsIgnoreCase(source.getCurrency()))
+                .filter(a -> !a.getName().equalsIgnoreCase(source.getName()))
+                .toList();
+
+        if (targetAccounts.isEmpty()) {
+            sendMessage(chatId, "⚠️ No other accounts found with currency *" + source.getCurrency() + "*.", buildFinanceKeyboard(), null);
+            return;
+        }
+
+        List<InlineKeyboardRow> rows = new ArrayList<>();
+        for (Account acc : targetAccounts) {
+            InlineKeyboardButton btn = InlineKeyboardButton.builder()
+                    .text(String.format("%s (%s)", acc.getName(), acc.getCurrency()))
+                    .callbackData("TR_TGT_" + acc.getName())
+                    .build();
+            InlineKeyboardRow row = new InlineKeyboardRow();
+            row.add(btn);
+            rows.add(row);
+        }
+
+        InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder().keyboard(rows).build();
+        sendMessage(chatId, String.format("Selected FROM: *%s*\nSelect target account *(TO)*:", source.getName()), null, markup);
+    }
+
     private void sendBalance(String chatId) {
         List<Account> accounts = financeService.getAllAccounts();
         BigDecimal totalPln = financeService.getTotalInPln();
@@ -366,7 +387,16 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         }
 
         sb.append(String.format("\n*Total in PLN:* ~%.2f PLN", totalPln));
-        sendMessage(chatId, sb.toString(), buildFinanceKeyboard(), null);
+
+        InlineKeyboardButton transferBtn = InlineKeyboardButton.builder()
+                .text("🔄 Transfer between accounts")
+                .callbackData("START_TRANSFER")
+                .build();
+        InlineKeyboardRow row = new InlineKeyboardRow();
+        row.add(transferBtn);
+        InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder().keyboard(List.of(row)).build();
+
+        sendMessage(chatId, sb.toString(), buildFinanceKeyboard(), markup);
     }
 
     private void sendHistory(String chatId) {
@@ -434,7 +464,193 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         sendMessage(chatId, sb.toString(), null, markup);
     }
 
-    // --- KEYBOARDS ---
+    private void handleTransferCommand(String chatId, String text) {
+        String raw = text.replaceFirst("/transfer", "").trim();
+
+        if (raw.contains("->")) {
+            String[] splitArrow = raw.split("->", 2);
+            String fromAccount = splitArrow[0].trim();
+            String rightSide = splitArrow[1].trim();
+
+            String[] tokens = rightSide.split("\\s+");
+            int amountIdx = -1;
+
+            for (int i = 0; i < tokens.length; i++) {
+                if (tokens[i].matches("^\\d+(\\.\\d+)?$")) {
+                    amountIdx = i;
+                    break;
+                }
+            }
+
+            if (amountIdx == -1) {
+                sendMessage(chatId, "⚠️ Invalid amount format. Example: `/transfer USD Cash -> USD Card 10`", buildFinanceKeyboard(), null);
+                return;
+            }
+
+            StringBuilder toAccBuilder = new StringBuilder();
+            for (int i = 0; i < amountIdx; i++) {
+                if (i > 0) toAccBuilder.append(" ");
+                toAccBuilder.append(tokens[i]);
+            }
+            String toAccount = toAccBuilder.toString().trim();
+
+            BigDecimal amount = new BigDecimal(tokens[amountIdx]);
+            StringBuilder noteBuilder = new StringBuilder();
+            for (int i = amountIdx + 1; i < tokens.length; i++) {
+                if (!noteBuilder.isEmpty()) noteBuilder.append(" ");
+                noteBuilder.append(tokens[i]);
+            }
+            String note = noteBuilder.toString();
+
+            executeTransfer(chatId, fromAccount, toAccount, amount, note);
+            return;
+        }
+
+        List<Account> allAccounts = financeService.getAllAccounts();
+        Account matchedFrom = allAccounts.stream()
+                .filter(a -> raw.toLowerCase().startsWith(a.getName().toLowerCase()))
+                .findFirst()
+                .orElse(null);
+
+        if (matchedFrom != null) {
+            String rest = raw.substring(matchedFrom.getName().length()).trim();
+            Account matchedTo = allAccounts.stream()
+                    .filter(a -> rest.toLowerCase().startsWith(a.getName().toLowerCase()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (matchedTo != null) {
+                String afterAccounts = rest.substring(matchedTo.getName().length()).trim();
+                String[] amountAndNote = afterAccounts.split("\\s+", 2);
+                try {
+                    BigDecimal amount = new BigDecimal(amountAndNote[0]);
+                    String note = amountAndNote.length > 1 ? amountAndNote[1] : "";
+                    executeTransfer(chatId, matchedFrom.getName(), matchedTo.getName(), amount, note);
+                    return;
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        sendMessage(chatId, "⚠️ Format error. Examples:\n`/transfer USD Cash -> USD Card 10`\n`/transfer USD Cash USD Card 10`", buildFinanceKeyboard(), null);
+    }
+
+    private void executeTransfer(String chatId, String from, String to, BigDecimal amount, String note) {
+        try {
+            financeService.transfer(from, to, amount, note);
+            sendMessage(chatId, String.format("🔄 Transferred *%.2f* from *%s* to *%s*.", amount, from, to), buildFinanceKeyboard(), null);
+        } catch (IllegalArgumentException ex) {
+            sendMessage(chatId, "⚠️ " + ex.getMessage(), buildFinanceKeyboard(), null);
+        }
+    }
+
+    private void handleDeleteReminder(String chatId, String text) {
+        try {
+            String[] parts = text.split(" ");
+            Long id = Long.parseLong(parts[1].trim());
+            boolean deleted = reminderService.deleteById(id);
+            if (deleted) {
+                sendMessage(chatId, String.format("Task `[%d]` removed / completed!", id), buildTasksKeyboard(), null);
+            } else {
+                sendMessage(chatId, "Task not found with ID: " + id, buildTasksKeyboard(), null);
+            }
+        } catch (Exception e) {
+            sendMessage(chatId, "Usage: `/done [ID]` or `/delete [ID]`", buildTasksKeyboard(), null);
+        }
+    }
+
+    private void handleRepeatCommand(String chatId, String text) {
+        try {
+            String[] parts = text.split(" ");
+            String frequency = parts[1].toLowerCase();
+
+            if ("weekly".equals(frequency)) {
+                java.time.DayOfWeek day = java.time.DayOfWeek.valueOf(parts[2].toUpperCase());
+                LocalTime time = LocalTime.parse(parts[3], TIME_FORMATTER);
+                String taskText = text.substring(text.indexOf(parts[3]) + parts[3].length()).trim();
+
+                Reminder reminder = reminderService.createWeeklyReminder(taskText, day, time);
+                sendMessage(chatId, String.format("🔄 Weekly reminder set for *%s* at *%s*! `[%d]`",
+                        day, reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
+            } else if ("daily".equals(frequency)) {
+                LocalTime time = LocalTime.parse(parts[2], TIME_FORMATTER);
+                String taskText = text.substring(text.indexOf(parts[2]) + parts[2].length()).trim();
+                Reminder reminder = reminderService.createDailyReminder(taskText, time);
+                sendMessage(chatId, String.format("🔄 Daily reminder set for *%s*! `[%d]`",
+                        reminder.getRemindAt().format(TIME_FORMATTER), reminder.getId()), buildTasksKeyboard(), null);
+            } else if ("monthly".equals(frequency)) {
+                int day = Integer.parseInt(parts[2]);
+                LocalTime time = LocalTime.parse(parts[3], TIME_FORMATTER);
+                String taskText = text.substring(text.indexOf(parts[3]) + parts[3].length()).trim();
+                Reminder reminder = reminderService.createMonthlyReminder(taskText, day, time);
+                sendMessage(chatId, String.format("🔄 Monthly reminder set for day *%d* at *%s*!",
+                        day, reminder.getRemindAt().format(TIME_FORMATTER)), buildTasksKeyboard(), null);
+            }
+        } catch (Exception e) {
+            sendMessage(chatId, "Format error. Examples:\n`/repeat weekly monday 10:00 Team meeting`\n`/repeat daily 09:00 Workout`\n`/repeat monthly 15 12:00 Rent`", buildTasksKeyboard(), null);
+        }
+    }
+
+    private void handleSnoozeCallback(String chatId, String data) {
+        String[] parts = data.split("_");
+        Long taskId = Long.parseLong(parts[2]);
+        LocalDateTime newTime;
+        String readableTime;
+
+        if ("TOMORROW".equals(parts[1])) {
+            newTime = LocalDate.now().plusDays(1).atTime(9, 0);
+            readableTime = "tomorrow at 09:00";
+        } else {
+            int minutes = Integer.parseInt(parts[1]);
+            newTime = LocalDateTime.now().plusMinutes(minutes);
+            readableTime = String.format("+%dm (%s)", minutes, newTime.format(TIME_FORMATTER));
+        }
+
+        reminderService.snoozeReminder(taskId, newTime);
+        sendMessage(chatId, String.format("💤 Reminder snoozed until *%s*.", readableTime), null, null);
+    }
+
+    private InlineKeyboardMarkup buildSnoozeKeyboard(Long taskId) {
+        InlineKeyboardButton btn15m = InlineKeyboardButton.builder()
+                .text("⏰ +15m")
+                .callbackData(String.format("SNOOZE_15_%d", taskId))
+                .build();
+
+        InlineKeyboardButton btn1h = InlineKeyboardButton.builder()
+                .text("⏰ +1h")
+                .callbackData(String.format("SNOOZE_60_%d", taskId))
+                .build();
+
+        InlineKeyboardButton btn3h = InlineKeyboardButton.builder()
+                .text("⏰ +3h")
+                .callbackData(String.format("SNOOZE_180_%d", taskId))
+                .build();
+
+        InlineKeyboardButton btnTomorrow = InlineKeyboardButton.builder()
+                .text("📅 Tomorrow 09:00")
+                .callbackData(String.format("SNOOZE_TOMORROW_%d", taskId))
+                .build();
+
+        InlineKeyboardButton btnDone = InlineKeyboardButton.builder()
+                .text("✅ Done")
+                .callbackData("DONE_TASK_" + taskId)
+                .build();
+
+        InlineKeyboardRow row1 = new InlineKeyboardRow();
+        row1.add(btn15m);
+        row1.add(btn1h);
+        row1.add(btn3h);
+
+        InlineKeyboardRow row2 = new InlineKeyboardRow();
+        row2.add(btnTomorrow);
+        row2.add(btnDone);
+
+        List<InlineKeyboardRow> rows = new ArrayList<>();
+        rows.add(row1);
+        rows.add(row2);
+
+        return InlineKeyboardMarkup.builder().keyboard(rows).build();
+    }
 
     private ReplyKeyboardMarkup buildMainMenuKeyboard() {
         KeyboardRow row1 = new KeyboardRow();
@@ -513,157 +729,6 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             telegramClient.execute(builder.build());
         } catch (TelegramApiException e) {
             log.error("Failed to send telegram message", e);
-        }
-    }
-
-    private void handleSnoozeCallback(String chatId, String data) {
-        // Format: SNOOZE_{MINUTES}_{TASK_ID} or SNOOZE_TOMORROW_{TASK_ID}
-        String[] parts = data.split("_");
-        Long taskId = Long.parseLong(parts[2]);
-        LocalDateTime newTime;
-        String readableTime;
-
-        if ("TOMORROW".equals(parts[1])) {
-            newTime = LocalDate.now().plusDays(1).atTime(9, 0);
-            readableTime = "tomorrow at 09:00";
-        } else {
-            int minutes = Integer.parseInt(parts[1]);
-            newTime = LocalDateTime.now().plusMinutes(minutes);
-            readableTime = String.format("+%dm (%s)", minutes, newTime.format(TIME_FORMATTER));
-        }
-
-        reminderService.snoozeReminder(taskId, newTime);
-        sendMessage(chatId, String.format("💤 Reminder snoozed until *%s*.", readableTime), null, null);
-    }
-
-    private InlineKeyboardMarkup buildSnoozeKeyboard(Long taskId) {
-        InlineKeyboardButton btn15m = InlineKeyboardButton.builder()
-                .text("⏰ +15m")
-                .callbackData(String.format("SNOOZE_15_%d", taskId))
-                .build();
-
-        InlineKeyboardButton btn1h = InlineKeyboardButton.builder()
-                .text("⏰ +1h")
-                .callbackData(String.format("SNOOZE_60_%d", taskId))
-                .build();
-
-        InlineKeyboardButton btn3h = InlineKeyboardButton.builder()
-                .text("⏰ +3h")
-                .callbackData(String.format("SNOOZE_180_%d", taskId))
-                .build();
-
-        InlineKeyboardButton btnTomorrow = InlineKeyboardButton.builder()
-                .text("📅 Tomorrow 09:00")
-                .callbackData(String.format("SNOOZE_TOMORROW_%d", taskId))
-                .build();
-
-        InlineKeyboardButton btnDone = InlineKeyboardButton.builder()
-                .text("✅ Done")
-                .callbackData("DONE_TASK_" + taskId)
-                .build();
-
-        InlineKeyboardRow row1 = new InlineKeyboardRow();
-        row1.add(btn15m);
-        row1.add(btn1h);
-        row1.add(btn3h);
-
-        InlineKeyboardRow row2 = new InlineKeyboardRow();
-        row2.add(btnTomorrow);
-        row2.add(btnDone);
-
-        List<InlineKeyboardRow> rows = new ArrayList<>();
-        rows.add(row1);
-        rows.add(row2);
-
-        return InlineKeyboardMarkup.builder().keyboard(rows).build();
-    }
-
-    private void handleTransferCommand(String chatId, String text) {
-        // Remove command prefix
-        String raw = text.replaceFirst("/transfer", "").trim();
-
-        // 1. Arrow syntax support: /transfer USD Cash -> USD Card 10 ATM
-        if (raw.contains("->")) {
-            String[] splitArrow = raw.split("->", 2);
-            String fromAccount = splitArrow[0].trim();
-            String rightSide = splitArrow[1].trim();
-
-            String[] tokens = rightSide.split("\\s+");
-            int amountIdx = -1;
-
-            // Find the numeric amount index
-            for (int i = 0; i < tokens.length; i++) {
-                if (tokens[i].matches("^\\d+(\\.\\d+)?$")) {
-                    amountIdx = i;
-                    break;
-                }
-            }
-
-            if (amountIdx == -1) {
-                sendMessage(chatId, "⚠️ Invalid amount format. Example: `/transfer USD Cash -> USD Card 10`", buildFinanceKeyboard(), null);
-                return;
-            }
-
-            // Build target account name (all words before amount)
-            StringBuilder toAccBuilder = new StringBuilder();
-            for (int i = 0; i < amountIdx; i++) {
-                if (i > 0) toAccBuilder.append(" ");
-                toAccBuilder.append(tokens[i]);
-            }
-            String toAccount = toAccBuilder.toString().trim();
-
-            // Parse amount
-            BigDecimal amount = new BigDecimal(tokens[amountIdx]);
-
-            // Build optional note (all words after amount)
-            StringBuilder noteBuilder = new StringBuilder();
-            for (int i = amountIdx + 1; i < tokens.length; i++) {
-                if (!noteBuilder.isEmpty()) noteBuilder.append(" ");
-                noteBuilder.append(tokens[i]);
-            }
-            String note = noteBuilder.toString();
-
-            executeTransfer(chatId, fromAccount, toAccount, amount, note);
-            return;
-        }
-
-        // 2. Direct match by existing account names: /transfer USD Cash USD Card 10
-        List<Account> allAccounts = financeService.getAllAccounts();
-        Account matchedFrom = allAccounts.stream()
-                .filter(a -> raw.toLowerCase().startsWith(a.getName().toLowerCase()))
-                .findFirst()
-                .orElse(null);
-
-        if (matchedFrom != null) {
-            String rest = raw.substring(matchedFrom.getName().length()).trim();
-            Account matchedTo = allAccounts.stream()
-                    .filter(a -> rest.toLowerCase().startsWith(a.getName().toLowerCase()))
-                    .findFirst()
-                    .orElse(null);
-
-            if (matchedTo != null) {
-                String afterAccounts = rest.substring(matchedTo.getName().length()).trim();
-                String[] amountAndNote = afterAccounts.split("\\s+", 2);
-                try {
-                    BigDecimal amount = new BigDecimal(amountAndNote[0]);
-                    String note = amountAndNote.length > 1 ? amountAndNote[1] : "";
-                    executeTransfer(chatId, matchedFrom.getName(), matchedTo.getName(), amount, note);
-                    return;
-                } catch (Exception ignored) {
-                    // Fall back to usage error message below
-                }
-            }
-        }
-
-        sendMessage(chatId, "⚠️ Format error. Examples:\n`/transfer USD Cash -> USD Card 10`\n`/transfer USD Cash USD Card 10`", buildFinanceKeyboard(), null);
-    }
-
-    private void executeTransfer(String chatId, String from, String to, BigDecimal amount, String note) {
-        try {
-            financeService.transfer(from, to, amount, note);
-            sendMessage(chatId, String.format("🔄 Transferred *%.2f* from *%s* to *%s*.", amount, from, to), buildFinanceKeyboard(), null);
-        } catch (IllegalArgumentException ex) {
-            sendMessage(chatId, "⚠️ " + ex.getMessage(), buildFinanceKeyboard(), null);
         }
     }
 }
