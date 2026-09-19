@@ -435,7 +435,6 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         }
 
         StringBuilder sb = new StringBuilder("*Active Tasks & Reminders:*\n\n");
-        List<InlineKeyboardRow> rows = new ArrayList<>();
 
         for (int i = 0; i < tasks.size(); i++) {
             Reminder task = tasks.get(i);
@@ -451,18 +450,60 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                         task.getRemindAt().format(DATE_FORMATTER),
                         repeat));
             }
-
-            InlineKeyboardButton doneBtn = InlineKeyboardButton.builder()
-                    .text(String.format("✅ Done #%d", displayIndex))
-                    .callbackData("DONE_TASK_" + task.getId())
-                    .build();
-            InlineKeyboardRow row = new InlineKeyboardRow();
-            row.add(doneBtn);
-            rows.add(row);
         }
 
-        InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder().keyboard(rows).build();
+        // Single complete button instead of one button per task
+        InlineKeyboardButton completeBtn = InlineKeyboardButton.builder()
+                .text("✅ Complete Task")
+                .callbackData("SHOW_TASKS_TO_COMPLETE")
+                .build();
+
+        InlineKeyboardRow row = new InlineKeyboardRow();
+        row.add(completeBtn);
+
+        InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder().keyboard(List.of(row)).build();
         sendMessage(chatId, sb.toString(), null, markup);
+    }
+
+    private void showCompleteTaskSelection(String chatId) {
+        List<Reminder> tasks = reminderService.getAllActive();
+        if (tasks.isEmpty()) {
+            sendMessage(chatId, "No active tasks to complete.", buildTasksKeyboard(), null);
+            return;
+        }
+
+        List<InlineKeyboardRow> rows = new ArrayList<>();
+        InlineKeyboardRow currentRow = new InlineKeyboardRow();
+
+        // Display up to 4 buttons per row: [#1] [#2] [#3]
+        for (int i = 0; i < tasks.size(); i++) {
+            Reminder task = tasks.get(i);
+            int displayIndex = i + 1;
+
+            InlineKeyboardButton btn = InlineKeyboardButton.builder()
+                    .text("#" + displayIndex)
+                    .callbackData("DONE_TASK_" + task.getId())
+                    .build();
+
+            currentRow.add(btn);
+
+            if (currentRow.size() == 4 || i == tasks.size() - 1) {
+                rows.add(currentRow);
+                currentRow = new InlineKeyboardRow();
+            }
+        }
+
+        // Cancel button
+        InlineKeyboardButton cancelBtn = InlineKeyboardButton.builder()
+                .text("❌ Cancel")
+                .callbackData("CANCEL_TASK_PICK")
+                .build();
+        InlineKeyboardRow cancelRow = new InlineKeyboardRow();
+        cancelRow.add(cancelBtn);
+        rows.add(cancelRow);
+
+        InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder().keyboard(rows).build();
+        sendMessage(chatId, "Pick task number to mark as done:", null, markup);
     }
 
     private void handleTransferCommand(String chatId, String text) {
