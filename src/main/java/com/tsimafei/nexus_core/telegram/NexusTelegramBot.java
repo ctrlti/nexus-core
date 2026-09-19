@@ -193,6 +193,12 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             userStates.put(chatId, "TRANSFER_AMOUNT");
             sendMessage(chatId, String.format("Transfer from *%s* to *%s*.\nEnter amount and optional note:\nExample: `100` or `100 ATM withdrawal`",
                     selectedAccounts.get(chatId), targetAccount), null, null);
+        } else if ("SHOW_TASKS_TO_COMPLETE".equals(data)) {
+            // Show task numbers to pick for completion
+            showCompleteTaskSelection(chatId);
+        } else if ("CANCEL_TASK_PICK".equals(data)) {
+            // Return back to main task list
+            sendActiveTasks(chatId);
         } else if (data.startsWith("DONE_TASK_")) {
             Long taskId = Long.parseLong(data.replace("DONE_TASK_", ""));
             reminderService.deleteById(taskId);
