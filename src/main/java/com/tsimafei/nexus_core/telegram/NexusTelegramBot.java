@@ -434,31 +434,63 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
     }
 
     private void sendActiveTasks(String chatId) {
-        List<Reminder> tasks = reminderService.getAllActive();
-        if (tasks.isEmpty()) {
+        List<Reminder> allTasks = reminderService.getAllActive();
+        if (allTasks.isEmpty()) {
             sendMessage(chatId, "No active tasks or reminders.", buildTasksKeyboard(), null);
             return;
         }
 
-        StringBuilder sb = new StringBuilder("*Active Tasks & Reminders:*\n\n");
+        // Split tasks into categories
+        List<Reminder> notes = new ArrayList<>();
+        List<Reminder> upcoming = new ArrayList<>();
+        List<Reminder> recurring = new ArrayList<>();
 
-        for (int i = 0; i < tasks.size(); i++) {
-            Reminder task = tasks.get(i);
-            int displayIndex = i + 1;
-
+        for (Reminder task : allTasks) {
             if (task.getRemindAt() == null) {
-                sb.append(String.format("%d. 📌 %s\n", displayIndex, task.getText()));
+                notes.add(task);
+            } else if ("NONE".equalsIgnoreCase(task.getRepeatInterval())) {
+                upcoming.add(task);
             } else {
-                String repeat = "NONE".equalsIgnoreCase(task.getRepeatInterval()) ? "" : " [" + task.getRepeatInterval() + "]";
-                sb.append(String.format("%d. ⏰ %s — *%s*%s\n",
-                        displayIndex,
-                        task.getText(),
-                        task.getRemindAt().format(DATE_FORMATTER),
-                        repeat));
+                recurring.add(task);
             }
         }
 
-        // Single complete button instead of one button per task
+        // Sort upcoming tasks by time (soonest first)
+        upcoming.sort((a, b) -> a.getRemindAt().compareTo(b.getRemindAt()));
+
+        StringBuilder sb = new StringBuilder("*Active Tasks & Reminders*\n\n");
+        int counter = 1;
+
+        if (!notes.isEmpty()) {
+            sb.append("📌 *Notes:*\n");
+            for (Reminder task : notes) {
+                sb.append(String.format("• #%d %s\n", counter++, task.getText()));
+            }
+            sb.append("\n");
+        }
+
+        if (!upcoming.isEmpty()) {
+            sb.append("⏰ *Upcoming:*\n");
+            for (Reminder task : upcoming) {
+                sb.append(String.format("• #%d %s — *%s*\n",
+                        counter++,
+                        task.getText(),
+                        task.getRemindAt().format(DATE_FORMATTER)));
+            }
+            sb.append("\n");
+        }
+
+        if (!recurring.isEmpty()) {
+            sb.append("🔄 *Recurring:*\n");
+            for (Reminder task : recurring) {
+                sb.append(String.format("• #%d [%s] %s — *%s*\n",
+                        counter++,
+                        task.getRepeatInterval(),
+                        task.getText(),
+                        task.getRemindAt().format(DATE_FORMATTER)));
+            }
+        }
+
         InlineKeyboardButton completeBtn = InlineKeyboardButton.builder()
                 .text("✅ Complete Task")
                 .callbackData("SHOW_TASKS_TO_COMPLETE")
@@ -468,7 +500,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         row.add(completeBtn);
 
         InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder().keyboard(List.of(row)).build();
-        sendMessage(chatId, sb.toString(), null, markup);
+        sendMessage(chatId, sb.toString().trim(), null, markup);
     }
 
     private void showCompleteTaskSelection(String chatId) {
