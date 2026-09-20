@@ -504,18 +504,35 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
     }
 
     private void showCompleteTaskSelection(String chatId) {
-        List<Reminder> tasks = reminderService.getAllActive();
-        if (tasks.isEmpty()) {
+        List<Reminder> allTasks = reminderService.getAllActive();
+        if (allTasks.isEmpty()) {
             sendMessage(chatId, "No active tasks to complete.", buildTasksKeyboard(), null);
             return;
         }
 
+        // Group and sort using the same order as in sendActiveTasks
+        List<Reminder> orderedTasks = new ArrayList<>();
+        List<Reminder> upcoming = new ArrayList<>();
+        List<Reminder> recurring = new ArrayList<>();
+
+        for (Reminder task : allTasks) {
+            if (task.getRemindAt() == null) {
+                orderedTasks.add(task);
+            } else if ("NONE".equalsIgnoreCase(task.getRepeatInterval())) {
+                upcoming.add(task);
+            } else {
+                recurring.add(task);
+            }
+        }
+        upcoming.sort((a, b) -> a.getRemindAt().compareTo(b.getRemindAt()));
+        orderedTasks.addAll(upcoming);
+        orderedTasks.addAll(recurring);
+
         List<InlineKeyboardRow> rows = new ArrayList<>();
         InlineKeyboardRow currentRow = new InlineKeyboardRow();
 
-        // Display up to 4 buttons per row: [#1] [#2] [#3]
-        for (int i = 0; i < tasks.size(); i++) {
-            Reminder task = tasks.get(i);
+        for (int i = 0; i < orderedTasks.size(); i++) {
+            Reminder task = orderedTasks.get(i);
             int displayIndex = i + 1;
 
             InlineKeyboardButton btn = InlineKeyboardButton.builder()
@@ -525,13 +542,12 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
 
             currentRow.add(btn);
 
-            if (currentRow.size() == 4 || i == tasks.size() - 1) {
+            if (currentRow.size() == 4 || i == orderedTasks.size() - 1) {
                 rows.add(currentRow);
                 currentRow = new InlineKeyboardRow();
             }
         }
 
-        // Cancel button
         InlineKeyboardButton cancelBtn = InlineKeyboardButton.builder()
                 .text("❌ Cancel")
                 .callbackData("CANCEL_TASK_PICK")
