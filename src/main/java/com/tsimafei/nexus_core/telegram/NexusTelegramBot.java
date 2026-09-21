@@ -51,6 +51,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
     private final Map<String, String> userStates = new ConcurrentHashMap<>();
     private final Map<String, String> selectedAccounts = new ConcurrentHashMap<>();
     private final Map<String, String> targetTransferAccounts = new ConcurrentHashMap<>();
+    private final Map<String, Long> pendingSnoozeTasks = new ConcurrentHashMap<>();
 
     public NexusTelegramBot(
             @Value("${nexus.telegram.bot-token}") String botToken,
@@ -297,6 +298,16 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 String note = parts.length > 1 ? parts[1] : "";
 
                 executeTransfer(chatId, from, to, amount, note);
+            } else if ("CUSTOM_SNOOZE".equals(state)) {
+                Long taskId = pendingSnoozeTasks.remove(chatId);
+                int minutes = Integer.parseInt(text.trim());
+                if (minutes <= 0) {
+                    throw new IllegalArgumentException("Minutes must be positive");
+                }
+                LocalDateTime newTime = LocalDateTime.now().plusMinutes(minutes);
+                reminderService.snoozeReminder(taskId, newTime);
+                String readableTime = String.format("+%dm (%s)", minutes, newTime.format(TIME_FORMATTER));
+                sendMessage(chatId, String.format("💤 Reminder snoozed until *%s*.", readableTime), buildTasksKeyboard(), null);
             }
 
         } catch (Exception e) {
@@ -690,6 +701,15 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
     private void handleSnoozeCallback(String chatId, String data) {
         String[] parts = data.split("_");
         Long taskId = Long.parseLong(parts[2]);
+
+        // Handle custom minutes prompt
+        if ("CUSTOM".equals(parts[1])) {
+            pendingSnoozeTasks.put(chatId, taskId);
+            userStates.put(chatId, "CUSTOM_SNOOZE");
+            sendMessage(chatId, "Enter snooze duration in minutes:\nExample: `20` or `45`", null, null);
+            return;
+        }
+
         LocalDateTime newTime;
         String readableTime;
 
@@ -727,6 +747,11 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 .callbackData(String.format("SNOOZE_TOMORROW_%d", taskId))
                 .build();
 
+        InlineKeyboardButton btnCustom = InlineKeyboardButton.builder()
+                .text("⏱ Custom")
+                .callbackData(String.format("SNOOZE_CUSTOM_%d", taskId))
+                .build();
+
         InlineKeyboardButton btnDone = InlineKeyboardButton.builder()
                 .text("✅ Done")
                 .callbackData("DONE_TASK_" + taskId)
@@ -739,11 +764,15 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
 
         InlineKeyboardRow row2 = new InlineKeyboardRow();
         row2.add(btnTomorrow);
-        row2.add(btnDone);
+        row2.add(btnCustom);
+
+        InlineKeyboardRow row3 = new InlineKeyboardRow();
+        row3.add(btnDone);
 
         List<InlineKeyboardRow> rows = new ArrayList<>();
         rows.add(row1);
         rows.add(row2);
+        rows.add(row3);
 
         return InlineKeyboardMarkup.builder().keyboard(rows).build();
     }
