@@ -300,13 +300,25 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 executeTransfer(chatId, from, to, amount, note);
             } else if ("CUSTOM_SNOOZE".equals(state)) {
                 Long taskId = pendingSnoozeTasks.remove(chatId);
-                int minutes = Integer.parseInt(text.trim());
-                if (minutes <= 0) {
-                    throw new IllegalArgumentException("Minutes must be positive");
+                String trimmed = text.trim();
+                LocalDateTime newTime;
+                String readableTime;
+
+                // Check if user entered relative minutes (e.g. 45)
+                if (trimmed.matches("^\\d+$")) {
+                    int minutes = Integer.parseInt(trimmed);
+                    if (minutes <= 0) {
+                        throw new IllegalArgumentException("Minutes must be positive");
+                    }
+                    newTime = LocalDateTime.now().plusMinutes(minutes);
+                    readableTime = String.format("+%dm (%s)", minutes, newTime.format(TIME_FORMATTER));
+                } else {
+                    // Parse exact time or date (e.g. 18:30 or 25.09 14:00)
+                    newTime = parseDateTime(trimmed);
+                    readableTime = newTime.format(DATE_FORMATTER);
                 }
-                LocalDateTime newTime = LocalDateTime.now().plusMinutes(minutes);
+
                 reminderService.snoozeReminder(taskId, newTime);
-                String readableTime = String.format("+%dm (%s)", minutes, newTime.format(TIME_FORMATTER));
                 sendMessage(chatId, String.format("💤 Reminder snoozed until *%s*.", readableTime), buildTasksKeyboard(), null);
             }
 
@@ -720,6 +732,17 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             int minutes = Integer.parseInt(parts[1]);
             newTime = LocalDateTime.now().plusMinutes(minutes);
             readableTime = String.format("+%dm (%s)", minutes, newTime.format(TIME_FORMATTER));
+        }
+
+        // Handle custom snooze prompt (minutes, specific time, or date)
+        if ("CUSTOM".equals(parts[1])) {
+            pendingSnoozeTasks.put(chatId, taskId);
+            userStates.put(chatId, "CUSTOM_SNOOZE");
+            sendMessage(chatId, "Enter snooze delay or exact time:\n\n" +
+                    "• Minutes: `45`\n" +
+                    "• Time today/tomorrow: `18:30`\n" +
+                    "• Specific date: `25.09 14:00`", null, null);
+            return;
         }
 
         reminderService.snoozeReminder(taskId, newTime);
