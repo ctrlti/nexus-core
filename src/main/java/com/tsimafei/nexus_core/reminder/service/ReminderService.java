@@ -76,6 +76,13 @@ public class ReminderService {
 
     @Transactional
     public void processTriggeredReminder(Reminder reminder) {
+        // If nag mode is enabled, keep nagging every X minutes until done
+        if (reminder.getNagIntervalMinutes() != null && reminder.getNagIntervalMinutes() > 0) {
+            reminder.setRemindAt(LocalDateTime.now().plusMinutes(reminder.getNagIntervalMinutes()));
+            reminderRepository.save(reminder);
+            return;
+        }
+
         String interval = reminder.getRepeatInterval();
 
         if ("DAILY".equalsIgnoreCase(interval)) {
@@ -89,6 +96,16 @@ public class ReminderService {
         }
 
         reminderRepository.save(reminder);
+    }
+
+    @Transactional
+    public void setNagMode(Long id, int minutes) {
+        reminderRepository.findById(id).ifPresent(reminder -> {
+            reminder.setNagIntervalMinutes(minutes);
+            reminder.setRemindAt(LocalDateTime.now().plusMinutes(minutes));
+            reminder.setActive(true);
+            reminderRepository.save(reminder);
+        });
     }
 
     @Transactional

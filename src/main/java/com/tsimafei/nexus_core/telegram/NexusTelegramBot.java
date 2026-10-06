@@ -52,6 +52,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
     private final Map<String, String> selectedAccounts = new ConcurrentHashMap<>();
     private final Map<String, String> targetTransferAccounts = new ConcurrentHashMap<>();
     private final Map<String, Long> pendingSnoozeTasks = new ConcurrentHashMap<>();
+    private final Map<String, Long> pendingNagTasks = new ConcurrentHashMap<>();
 
     public NexusTelegramBot(
             @Value("${nexus.telegram.bot-token}") String botToken,
@@ -207,6 +208,11 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
             sendActiveTasks(chatId);
         } else if (data.startsWith("SNOOZE_")) {
             handleSnoozeCallback(chatId, data);
+        } else if (data.startsWith("START_NAG_")) {
+            Long taskId = Long.parseLong(data.replace("START_NAG_", ""));
+            pendingNagTasks.put(chatId, taskId);
+            userStates.put(chatId, "SET_NAG_MINUTES");
+            sendMessage(chatId, "Enter interval in minutes to nag until marked done:\nExample: `15` or `30`", null, null);
         }
     }
 
@@ -298,6 +304,14 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 String note = parts.length > 1 ? parts[1] : "";
 
                 executeTransfer(chatId, from, to, amount, note);
+            } else if ("SET_NAG_MINUTES".equals(state)) {
+                Long taskId = pendingNagTasks.remove(chatId);
+                int minutes = Integer.parseInt(text.trim());
+                if (minutes <= 0) {
+                    throw new IllegalArgumentException("Interval must be positive");
+                }
+                reminderService.setNagMode(taskId, minutes);
+                sendMessage(chatId, String.format("🔁 Nag mode enabled! Bot will remind every *%d* minutes until marked done.", minutes), buildTasksKeyboard(), null);
             } else if ("CUSTOM_SNOOZE".equals(state)) {
                 Long taskId = pendingSnoozeTasks.remove(chatId);
                 String trimmed = text.trim();
@@ -775,6 +789,11 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
                 .callbackData(String.format("SNOOZE_CUSTOM_%d", taskId))
                 .build();
 
+        InlineKeyboardButton btnNag = InlineKeyboardButton.builder()
+                .text("🔁 Nag every...")
+                .callbackData(String.format("START_NAG_%d", taskId))
+                .build();
+
         InlineKeyboardButton btnDone = InlineKeyboardButton.builder()
                 .text("✅ Done")
                 .callbackData("DONE_TASK_" + taskId)
@@ -790,6 +809,7 @@ public class NexusTelegramBot implements SpringLongPollingBot, LongPollingSingle
         row2.add(btnCustom);
 
         InlineKeyboardRow row3 = new InlineKeyboardRow();
+        row3.add(btnNag);
         row3.add(btnDone);
 
         List<InlineKeyboardRow> rows = new ArrayList<>();

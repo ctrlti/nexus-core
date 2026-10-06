@@ -1,0 +1,1 @@
+ALTER TABLE reminders ADD COLUMN nag_interval_minutes INTEGER;

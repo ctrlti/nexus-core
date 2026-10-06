@@ -26,6 +26,12 @@ public class Reminder {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
+    @Column(name = "nag_interval_minutes")
+    private Integer nagIntervalMinutes;
+
+    public Integer getNagIntervalMinutes() { return nagIntervalMinutes; }
+    public void setNagIntervalMinutes(Integer nagIntervalMinutes) { this.nagIntervalMinutes = nagIntervalMinutes; }
+
     public Reminder() {}
 
     public Reminder(String text, LocalDateTime remindAt, String repeatInterval) {
